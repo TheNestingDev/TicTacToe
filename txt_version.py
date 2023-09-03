@@ -1,20 +1,23 @@
 import os
 import colorama
 
-colorama.init()
-color = colorama.Fore
-
+# player infos
 PLAYER_O= "O"
 PLAYER_X= "X"
 FIELD_EMPTY = " "
+
+# deco
+colorama.init()
+color = colorama.Fore
 
 PLAYER_X_COLOR = color.BLUE
 PLAYER_O_COLOR = color.MAGENTA
 FIELD_COLOR = color.GREEN
 
+# game flags
 GAME_ACTIVE = object()
 GAME_WON = object()
-GAME_TRAW = object()
+GAME_DRAW = object()
 
 class Field:
     def clear_screen(self):
@@ -81,7 +84,8 @@ class Field:
         self.field[target_index_y][target_index_x] = self.current_player
         self.switch_player()
 
-    def check_winner(self):
+    def check_game_winner(self):
+        """has one player won already? update the game_state accordingly"""
         win_chases = []
 
         # horizontals
@@ -104,7 +108,8 @@ class Field:
 
             self.game_state = GAME_WON
 
-    def check_game_traw(self):
+    def check_game_draw(self):
+        """is the game a draw? update the game_state accordingly"""
         if not self.game_state == GAME_ACTIVE:
             return
 
@@ -113,10 +118,11 @@ class Field:
             check_result.append(FIELD_EMPTY in row)
 
         if not any(check_result):
-            self.game_state = GAME_TRAW
+            self.game_state = GAME_DRAW
 
     def show_game_state(self):
-        self.switch_player()
+        """show the game result who won or if its a draw"""
+        self.switch_player() # we need to switch the player again to show the right player
         if self.game_state == GAME_WON:
             print(f"\n{color.GREEN}PLAYER {color.MAGENTA}{self.current_player}{color.GREEN} HAS WON{color.RESET}")
         else:
@@ -126,19 +132,20 @@ class Field:
         while self.game_state == GAME_ACTIVE:
             self.draw()
             self.check_input()
-            self.check_winner()
-            self.check_game_traw()
+            self.check_game_winner()
+            self.check_game_draw()
 
         self.draw()
         self.show_game_state()
 
 def main():
     field = Field()
-    field.setup()
-    field.run()
+    play_again = "1"
+
+    while play_again == "1":
+        field.setup()
+        field.run()
+        play_again = input("enter 1 to play again: ")
 
 if __name__ == "__main__":
-    try:
-        main()
-    finally:
-        print(color.RESET, end="")
+    main()

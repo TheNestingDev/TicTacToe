@@ -8,14 +8,30 @@ SCREEN_SIZE = WIDTH, HEIGHT = 800, 600
 
 PLAYER_O = "O"
 PLAYER_X = "X"
+
+PLAYER_X_COLOR = (50, 50, 80)
+PLAYER_O_COLOR = (20, 50, 60)
+FIELD_COLOR = (100, 100, 100)
+BACKGROUND_COLOR = (40, 40, 40)
+
+MAX_ROUND_DURATION = 20
+MAX_MOVE_DURATION = 5
+
 GAME_ACTIVE = object()
 GAME_WON = object()
 GAME_DRAW = object()
+GAME_TIMEOUT = object()
+
+NORMAL_MODE = object()
+CHALLENGE_MODE = object()
 
 MAX_FPS = 60
 
+class Settings:
+    GAME_MODE = NORMAL_MODE
+
 class Field:
-    def __init__(self, screen, field_id:tuple, pos:tuple, size:tuple, game:Game):
+    def __init__(self, screen, field_id:tuple, pos:tuple, size:tuple, game:GameView):
         self.game = game
         self.screen = screen
         self.field_id = field_id
@@ -25,7 +41,7 @@ class Field:
         self.center_pos = self.get_center()
 
         self.body = pygame.Rect(*pos, *size)
-        self.color = (255, 0, 0)
+        self.color = FIELD_COLOR
 
         self.state = None
 
@@ -54,24 +70,27 @@ class Field:
             return
 
         if self.game.game_state != GAME_ACTIVE:
-            self.game.field_event(self)
+            self.game.field_click_event(self)
             return
 
         if self.state is not None:
             return
 
         self.state = self.game.current_player
-        self.game.field_event(self)
+        self.game.field_click_event(self)
+        self.game.moves_played += 1
+        self.game.move_timer = MAX_MOVE_DURATION
 
     def draw_mark_x(self):
-        pygame.draw.line(self.screen, (0, 0, 255),
-                         self.pos, (self.pos[0]+self.size[0], self.pos[1]+self.size[1]), 15)
-        pygame.draw.line(self.screen, (0, 0, 255),
-                         (self.pos[0]+self.size[0], self.pos[1]),
-                         (self.pos[0], self.pos[1]+self.size[1]), 15)
+        pygame.draw.line(self.screen, PLAYER_X_COLOR,
+                         (self.pos[0]+7, self.pos[1]), (self.pos[0]+self.size[0]-7, self.pos[1]+self.size[1]), 15)
+        pygame.draw.line(self.screen, PLAYER_X_COLOR,
+                         (self.pos[0]+self.size[0]-7, self.pos[1]),
+                         (self.pos[0]+7, self.pos[1]+self.size[1]), 15)
 
     def draw_mark_circle(self):
-        pygame.draw.circle(self.screen, (0, 0, 255), self.center_pos, 70)
+        pygame.draw.circle(self.screen, PLAYER_O_COLOR, self.center_pos, 85)
+        pygame.draw.circle(self.screen, FIELD_COLOR, self.center_pos, 60)
 
     def draw_mark(self):
         if self.state == PLAYER_O:
@@ -83,13 +102,62 @@ class Field:
         pygame.draw.rect(self.screen, self.color, self.body)
         self.draw_mark()
 
-class Game:
+class View:
+    def __init__(self, screen:pygame.Surface, clock:pygame.time.Clock):
+        self.screen = screen
+        self.clock = clock
+        self.delta_time = 1
+        self.font = pygame.font.Font(None, 30)
+        self.old_mouse_state = False
+
+        self.change_menu = None
+
+    def show_txt(self, text:str, pos:tuple):
+        text_surface = self.font.render(text, True, (255, 255, 255))
+        self.screen.blit(text_surface, pos)
+
+    def mouse_state_changed(self):
+        new_mouse_state = pygame.mouse.get_pressed()[0]
+        old_mouse_state = self.old_mouse_state
+        self.old_mouse_state = new_mouse_state
+        return not new_mouse_state and old_mouse_state
+
+    def setup(self):
+        self.old_mouse_state = False
+
+    def draw(self, screen:pygame.Surface):
+        pass
+
+    def handle_events(self):
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+
+    def update(self):
+        pass
+
+    def run(self):
+        while True:
+            self.handle_events()
+            self.update()
+
+            self.screen.fill(BACKGROUND_COLOR)
+            self.draw(self.screen)
+            pygame.display.flip()
+
+            self.delta_time = self.clock.tick(MAX_FPS)
+
+            if self.change_menu is not None:
+                return self.change_menu
+
+class GameView(View):
     def create_fields(self):
         result = {}
-        pos_x = 50
-        pos_y = 50
-        width = 150
-        height = 150
+        pos_x = 20
+        pos_y = 20
+        width = 180
+        height = 180
 
         for y in range(3):
             for x in range(3):
@@ -100,59 +168,59 @@ class Game:
                 pos_x += width + 10
 
             pos_y += height + 10
-            pos_x = 50
+            pos_x = 20
 
         return result
 
-    def __init__(self):
-        self.screen = pygame.display.set_mode(SCREEN_SIZE)
-        self.clock = pygame.time.Clock()
-        pygame.display.set_caption("TicTacToe")
-
-        self.delta_time = 1
-        self.font = pygame.font.Font(None, 30)
+    def __init__(self, screen:pygame.Surface, clock:pygame.time.Clock):
+        super().__init__(screen, clock)
 
         self.fields = self.create_fields()
+        self.rounds_played = 0
 
     def setup(self):
+        super().setup()
+
         self.current_player = PLAYER_X
         self.game_state = GAME_ACTIVE
-        self.old_mouse_state = False
-        self.after_game_lock = False
+        self.after_game_lock = True
+
+        self.moves_played = 0
+        self.rounds_played += 1
+        self.general_timer = 0
+
+        self.round_timer = MAX_ROUND_DURATION
+        self.move_timer = MAX_MOVE_DURATION
 
         for field in self.fields.values():
             field.state = None
-
-    def mouse_state_changed(self):
-        new_mouse_state = pygame.mouse.get_pressed()[0]
-        old_mouse_state = self.old_mouse_state
-        self.old_mouse_state = new_mouse_state
-        return not new_mouse_state and old_mouse_state
-
-    def show_txt(self, text:str, pos:tuple):
-        text_surface = self.font.render(text, True, (255, 255, 255))
-        self.screen.blit(text_surface, pos)
 
     def draw(self, scr):
         for field in self.fields.values():
             field.draw()
 
         if self.game_state == GAME_ACTIVE:
-            self.show_txt(f"Current Player: {self.current_player}", (550, 50))
+            self.show_txt(f"PLAYING MATCH {self.rounds_played}", (600, 20))
+            self.show_txt(f"{self.moves_played} MOVES PLAYED", (600, 50))
+
+            self.show_txt(f"Current Player: {self.current_player}", (600, 90))
+
+            self.show_txt(f"GAME TIME LEFT:", (600, 130))
+            self.show_txt(f"{int(self.round_timer)} sec.", (600, 150))
+            self.show_txt(f"Move Timer:", (600, 180))
+            self.show_txt(f"-- {int(self.move_timer)} sec. --", (600, 200))
+
         elif self.game_state == GAME_WON:
-            self.show_txt(f"PLAYER {self.current_player} HAS WON", (550, 50))
+            self.show_txt(f"PLAYER {self.current_player} HAS WON", (600, 20))
         elif self.game_state == GAME_DRAW:
-            self.show_txt(f"NO WINNER EXISTS...", (550, 50))
+            self.show_txt(f"NO WINNER EXISTS...", (600, 20))
+        elif self.game_state == GAME_TIMEOUT:
+            self.show_txt(f"TIMEOUT!!!!!", (600, 20))
+            self.show_txt(f"TOO SLOW HAHA", (600, 50))
 
         if self.game_state != GAME_ACTIVE:
-            self.show_txt("Please press any", (550, 90))
-            self.show_txt("field to play again!", (550, 110))
-
-    def handle_events(self):
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
+            self.show_txt("Please press any", (600, 90))
+            self.show_txt("field to play again!", (600, 110))
 
     def switch_player(self):
         if self.current_player == PLAYER_O:
@@ -160,7 +228,7 @@ class Game:
         else:
             self.current_player = PLAYER_O
 
-    def field_event(self, field:Field):
+    def field_click_event(self, field:Field):
         if self.game_state != GAME_ACTIVE:
             self.setup()
             return
@@ -190,7 +258,7 @@ class Game:
                 continue
 
             self.game_state = GAME_WON
-            self.after_lock()
+            self.after_game_lock = True
             self.switch_player()
 
     def check_game_draw(self):
@@ -206,9 +274,31 @@ class Game:
 
         if not any(check_result):
             self.game_state = GAME_DRAW
-            self.after_lock()
+            self.after_game_lock = True
+
+    def update_timer(self):
+        self.general_timer += self.delta_time
+        if self.general_timer < 1000:
+            return
+
+        self.general_timer = 0
+        self.move_timer -= 1
+        self.round_timer -= 1
+
+        if self.move_timer < 0:
+            self.switch_player()
+            self.move_timer = MAX_MOVE_DURATION
+
+        if self.round_timer < 0:
+            self.game_state = GAME_TIMEOUT
 
     def update(self):
+        if self.after_game_lock:
+            if self.mouse_state_changed():
+                self.after_game_lock = False
+            else:
+                return
+
         mouse_pressed = pygame.mouse.get_pressed()[0]
         mouse_pos = pygame.mouse.get_pos()
         for field in self.fields.values():
@@ -217,25 +307,42 @@ class Game:
         if self.game_state != GAME_ACTIVE:
             return
 
+        self.update_timer()
         self.check_game_winner()
         self.check_game_draw()
 
+class MainView(View):
+    def __init__(self, screen:pygame.Surface, clock:pygame.time.Clock):
+        super().__init__(screen, clock)
+
+    def draw(self, screen: pygame.Surface):
+        self.show_txt("CLICK ANYWHERE IN THE WINDOW TO START", (150, 300))
+
+    def update(self):
+        if self.mouse_state_changed():
+            self.change_menu = "game"
+
+class Window:
+    def __init__(self):
+        self.screen = pygame.display.set_mode(SCREEN_SIZE)
+        self.clock = pygame.time.Clock()
+        pygame.display.set_caption("TicTacToe")
+
+        self.menus = {"main": MainView, "game": GameView}
+        self.start_with = "main"
+
     def run(self):
+        view_class:View = self.menus[self.start_with]
+
         while True:
-            self.handle_events()
-            self.update()
-
-            self.screen.fill((0, 0, 0))
-            self.draw(self.screen)
-            pygame.display.flip()
-
-            self.delta_time = self.clock.tick(MAX_FPS)
-
+            view_object:View = view_class(self.screen, self.clock)
+            view_object.setup()
+            next_view = view_object.run()
+            view_class = self.menus[next_view]
 
 def main():
-    game = Game()
-    game.setup()
-    game.run()
+    window = Window()
+    window.run()
 
 if __name__ == "__main__":
     main()
